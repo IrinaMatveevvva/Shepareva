@@ -1,161 +1,152 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import json
+from datetime import datetime
 
-MOVIES_FILE = 'movies.json'
+DATA_FILE = 'expenses.json'
 
-class MovieLibrary:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Movie Library")
-        self.root.geometry("700x500")
+def load_data():
+    try:
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
-        self.movies = self.load_movies()
-        self.setup_ui()
+def save_data(data):
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def load_movies(self):
-        try:
-            with open(MOVIES_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data if isinstance(data, list) else []
-        except FileNotFoundError:
-            return []
-        except json.JSONDecodeError:
-            # Возвращаем пустой список при поврежденном или пустом файле
-            return []
+def add_expense():
+    amount = entry_amount.get()
+    category = combo_category.get()
+    date = entry_date.get()
 
-    def save_movies(self):
-        with open(MOVIES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(self.movies, f, ensure_ascii=False, indent=2)
+    if not amount.replace('.', '', 1).isdigit() or float(amount) <= 0:
+        messagebox.showerror('Ошибка', 'Сумма должна быть положительным числом')
+        return
 
-    def setup_ui(self):
-        # --- Форма ввода ---
-        frame_input = ttk.LabelFrame(self.root, text="Добавление фильма", padding=10)
-        frame_input.pack(padx=10, pady=10, fill='x')
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        messagebox.showerror('Ошибка', 'Дата должна быть в формате ГГГГ-ММ-ДД')
+        return
 
-        labels = ["Название:", "Жанр:", "Год выпуска:", "Рейтинг (0-10):"]
-        self.entries = []
+    expense = {'amount': float(amount), 'category': category, 'date': date}
+    data.append(expense)
+    save_data(data)
+    update_table()
+    clear_inputs()
 
-        for i, text in enumerate(labels):
-            ttk.Label(frame_input, text=text).grid(row=0, column=i*2, padx=5, pady=5)
-            entry = ttk.Entry(frame_input, width=15)
-            entry.grid(row=0, column=i*2+1, padx=5, pady=5)
-            self.entries.append(entry)
+def update_table(filter_category=None, filter_date=None):
+    for i in tree.get_children():
+        tree.delete(i)
+    for expense in data:
+        if filter_category and expense['category'] != filter_category:
+            continue
+        if filter_date and expense['date'] != filter_date:
+            continue
+        tree.insert('', 'end', values=(expense['date'], expense['category'], expense['amount']))
 
-        self.entry_title, self.entry_genre, self.entry_year, self.entry_rating = self.entries
+def filter_expenses():
+    category = combo_filter_category.get() if combo_filter_category.get() else None
+    date = entry_filter_date.get() if entry_filter_date.get() else None
+    update_table(category, date)
 
-        btn_add = ttk.Button(frame_input, text="Добавить фильм", command=self.add_movie)
-        btn_add.grid(row=1, column=0, columnspan=8, pady=10)
+def sum_expenses():
+    start_date = entry_start_date.get()
+    end_date = entry_end_date.get()
 
-        # --- Блок фильтрации ---
-        frame_filter = ttk.LabelFrame(self.root, text="Фильтрация", padding=10)
-        frame_filter.pack(padx=10, pady=5, fill='x')
+    try:
+        if start_date:
+            datetime.strptime(start_date, '%Y-%m-%d')
+        if end_date:
+            datetime.strptime(end_date, '%Y-%m-%d')
+    except ValueError:
+        messagebox.showerror('Ошибка', 'Даты должны быть в формате ГГГГ-ММ-ДД')
+        return
 
-        ttk.Label(frame_filter, text="Жанр:").grid(row=0, column=0, padx=5)
-        self.entry_filter_genre = ttk.Entry(frame_filter, width=15)
-        self.entry_filter_genre.grid(row=0, column=1, padx=5)
+    total = sum(
+        e['amount'] for e in data
+        if (not start_date or e['date'] >= start_date)
+        and (not end_date or e['date'] <= end_date)
+    )
+    label_sum.config(text=f'Сумма: {total:.2f} ₽')
 
-        ttk.Label(frame_filter, text="Год (мин):").grid(row=0, column=2, padx=5)
-        self.entry_filter_year = ttk.Entry(frame_filter, width=10)
-        self.entry_filter_year.grid(row=0, column=3, padx=5)
+def clear_inputs():
+    entry_amount.delete(0, tk.END)
+    combo_category.set('')
+    entry_date.delete(0, tk.END)
 
-        btn_filter = ttk.Button(frame_filter, text="Применить", command=self.apply_filter)
-        btn_filter.grid(row=0, column=4, padx=5)
+# Загрузка данных
+data = load_data()
 
-        btn_reset = ttk.Button(frame_filter, text="Сброс", command=self.reset_filter)
-        btn_reset.grid(row=0, column=5, padx=5)
+# Основное окно
+root = tk.Tk()
+root.title('Expense Tracker')
+root.geometry('800x500')
 
-        # --- Таблица ---
-        columns = ('title', 'genre', 'year', 'rating')
-        self.tree = ttk.Treeview(self.root, columns=columns, show='headings')
-        self.tree.heading('title', text='Название')
-        self.tree.heading('genre', text='Жанр')
-        self.tree.heading('year', text='Год выпуска')
-        self.tree.heading('rating', text='Рейтинг')
+# Вкладки
+tab_control = ttk.Notebook(root)
+tab_main = ttk.Frame(tab_control)
+tab_filter = ttk.Frame(tab_control)
+tab_sum = ttk.Frame(tab_control)
+tab_control.add(tab_main, text='Добавить расход')
+tab_control.add(tab_filter, text='Фильтр')
+tab_control.add(tab_sum, text='Сумма за период')
+tab_control.pack(expand=1, fill='both')
 
-        self.tree.column('year', width=100)
-        self.tree.column('rating', width=100)
-        
-        self.tree.pack(padx=10, pady=10, fill='both', expand=True)
+# Вкладка "Добавить расход"
+tk.Label(tab_main, text='Сумма:').grid(row=0, column=0, padx=5, pady=5)
+entry_amount = tk.Entry(tab_main)
+entry_amount.grid(row=0, column=1, padx=5, pady=5)
 
-        self.refresh_list(self.movies)
+tk.Label(tab_main, text='Категория:').grid(row=1, column=0, padx=5, pady=5)
+combo_category = ttk.Combobox(tab_main, values=['Еда', 'Транспорт', 'Развлечения', 'Прочее'])
+combo_category.grid(row=1, column=1, padx=5, pady=5)
 
-    def add_movie(self):
-        title = self.entry_title.get().strip()
-        genre = self.entry_genre.get().strip()
-        year_str = self.entry_year.get().strip()
-        rating_str = self.entry_rating.get().strip()
+tk.Label(tab_main, text='Дата (ГГГГ-ММ-ДД):').grid(row=2, column=0, padx=5, pady=5)
+entry_date = tk.Entry(tab_main)
+entry_date.grid(row=2, column=1, padx=5, pady=5)
 
-        if not (title and genre and year_str and rating_str):
-            messagebox.showwarning("Ошибка", "Все поля должны быть заполнены!")
-            return
+btn_add = tk.Button(tab_main, text='Добавить расход', command=add_expense)
+btn_add.grid(row=3, column=0, columnspan=2, pady=10)
 
-        try:
-            year = int(year_str)
-        except ValueError:
-            messagebox.showwarning("Ошибка", "Год должен быть целым числом!")
-            return
+# Таблица расходов
+tree = ttk.Treeview(tab_main, columns=('Дата', 'Категория', 'Сумма'), show='headings')
+tree.heading('Дата', text='Дата')
+tree.heading('Категория', text='Категория')
+tree.heading('Сумма', text='Сумма')
+tree.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky='nsew')
 
-        try:
-            rating = float(rating_str)
-            if not (0.0 <= rating <= 10.0):
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning("Ошибка", "Рейтинг должен быть числом от 0 до 10!")
-            return
+# Вкладка "Фильтр"
+tk.Label(tab_filter, text='Категория:').grid(row=0, column=0, padx=5, pady=5)
+combo_filter_category = ttk.Combobox(tab_filter, values=['Все', 'Еда', 'Транспорт', 'Развлечения', 'Прочее'])
+combo_filter_category.set('Все')
+combo_filter_category.grid(row=0, column=1, padx=5, pady=5)
 
-        new_movie = {
-            "title": title,
-            "genre": genre,
-            "year": year,
-            "rating": rating
-        }
+tk.Label(tab_filter, text='Дата (ГГГГ-ММ-ДД):').grid(row=1, column=0, padx=5, pady=5)
+entry_filter_date = tk.Entry(tab_filter)
+entry_filter_date.grid(row=1, column=1, padx=5, pady=5)
 
-        self.movies.append(new_movie)
-        self.save_movies()
-        self.refresh_list(self.movies)
+btn_filter = tk.Button(tab_filter, text='Применить фильтр', command=filter_expenses)
+btn_filter.grid(row=2, column=0, columnspan=2, pady=10)
 
-        # Очистка полей
-        self.entry_title.delete(0, tk.END)
-        self.entry_genre.delete(0, tk.END)
-        self.entry_year.delete(0, tk.END)
-        self.entry_rating.delete(0, tk.END)
+# Вкладка "Сумма за период"
+tk.Label(tab_sum, text='С:').grid(row=0, column=0, padx=5, pady=5)
+entry_start_date = tk.Entry(tab_sum)
+entry_start_date.grid(row=0, column=1, padx=5, pady=5)
 
-    def refresh_list(self, data_to_display):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        for movie in data_to_display:
-            self.tree.insert('', tk.END, values=(movie['title'], movie['genre'], movie['year'], movie['rating']))
+tk.Label(tab_sum, text='По:').grid(row=1, column=0, padx=5, pady=5)
+entry_end_date = tk.Entry(tab_sum)
+entry_end_date.grid(row=1, column=1, padx=5, pady=5)
 
-    def apply_filter(self):
-        filter_genre = self.entry_filter_genre.get().strip().lower()
-        filter_year_str = self.entry_filter_year.get().strip()
+btn_sum = tk.Button(tab_sum, text='Посчитать сумму', command=sum_expenses)
+btn_sum.grid(row=2, column=0, columnspan=2, pady=10)
 
-        # Валидация фильтра года
-        filter_year = None
-        if filter_year_str:
-            try:
-                filter_year = int(filter_year_str)
-            except ValueError:
-                messagebox.showwarning("Ошибка фильтра", "Год в фильтре должен быть целым числом!")
-                return
+label_sum = tk.Label(tab_sum, text='Сумма: 0.00 ₽')
+label_sum.grid(row=3, column=0, columnspan=2, pady=10)
 
-        filtered = []
-        for m in self.movies:
-            match_genre = (not filter_genre or filter_genre in m['genre'].lower())
-            match_year = (filter_year is None or m['year'] >= filter_year)
-            if match_genre and match_year:
-                filtered.append(m)
+# Заполнение таблицы при запуске
+update_table()
 
-        self.refresh_list(filtered)
-
-    def reset_filter(self):
-        self.entry_filter_genre.delete(0, tk.END)
-        self.entry_filter_year.delete(0, tk.END)
-        self.refresh_list(self.movies)
-
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = MovieLibrary(root)
-    root.mainloop()
+root.mainloop()
